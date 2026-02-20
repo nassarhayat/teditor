@@ -1,0 +1,19 @@
+[package]
+name = "teditor"
+version = "0.1.0"
+edition = "2021"
+description = "A minimal TUI file browser and text editor with fuzzy search and syntax highlighting"
+license = "MIT"
+repository = "https://github.com/nassarhayat/teditor"
+keywords = ["tui", "editor", "fuzzy-search", "terminal"]
+categories = ["command-line-utilities", "text-editors"]
+
+[dependencies]
+ratatui = "0.28"
+crossterm = "0.28"
+nucleo = "0.5"
+ignore = "0.4"
+tui-textarea = { version = "0.6", features = ["search"] }
+syntect = { version = "5.2", default-features = false, features = ["default-fancy"] }
+anyhow = "1.0"
+notify = { version = "6.1", default-features = false, features = ["macos_fsevent"] }
