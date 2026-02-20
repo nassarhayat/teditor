@@ -28,18 +28,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     let items: Vec<ListItem> = if app.search.search_active {
         // Search mode: flat list of matches
-        let matches = app.matches();
-        matches
-            .iter()
-            .enumerate()
-            .skip(scroll_offset)
-            .take(list_height)
-            .map(|(i, (path, score))| {
-                let path_str = path
-                    .strip_prefix(&app.search.root)
-                    .unwrap_or(path)
-                    .to_string_lossy();
-
+        let match_count = app.search.match_count();
+        let end = (scroll_offset + list_height).min(match_count);
+        (scroll_offset..end)
+            .filter_map(|i| app.search.match_path_at(i).map(|(p, s)| (i, p, s)))
+            .map(|(i, path, score)| {
+                let path_str = path.to_string_lossy();
                 let content = format!("{} ({})", path_str, score);
 
                 let style = if i == app.selected_index {
@@ -56,15 +50,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .collect()
     } else {
         // Tree mode: show directory structure
-        let entries = app.search.visible_entries();
-        entries
-            .iter()
-            .enumerate()
-            .skip(scroll_offset)
-            .take(list_height)
+        let visible_count = app.search.visible_len();
+        let end = (scroll_offset + list_height).min(visible_count);
+        (scroll_offset..end)
+            .filter_map(|i| app.search.visible_entry_at(i).map(|e| (i, e)))
             .map(|(i, entry)| {
                 let indent = "  ".repeat(entry.depth);
-                let name = entry.path.file_name()
+                let name = entry.path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| entry.path.to_string_lossy().to_string());
 
@@ -107,7 +100,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     frame.render_widget(list, chunks[0]);
 
-    // Search input with match count and hidden files indicator
+    // Search / create input with match count and hidden files indicator
     let count = app.search.match_count();
     let match_info = if app.search.search_active {
         format!("{} matches", count)
@@ -115,20 +108,45 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         format!("{} items", count)
     };
 
-    let input = Paragraph::new(format!(" {}", app.search_input))
+    let base_display = if app.create_base.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        app.create_base.to_string_lossy().to_string()
+    };
+
+    let (input_text, input_title, input_bottom) = if app.create_active {
+        (
+            app.create_input.as_str(),
+            format!(" New (in {}/) ", base_display),
+            "Enter: create | Esc: cancel".to_string(),
+        )
+    } else {
+        (
+            app.search_input.as_str(),
+            " Search ".to_string(),
+            match_info,
+        )
+    };
+
+    let input = Paragraph::new(format!(" {}", input_text))
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Search ")
+                .title(input_title)
                 .title_style(Style::default().fg(Color::Yellow))
-                .title_bottom(Line::from(match_info).right_aligned()),
+                .title_bottom(Line::from(input_bottom).right_aligned()),
         );
     frame.render_widget(input, chunks[1]);
 
-    // Cursor position in search box
+    // Cursor position in input box
+    let cursor_len = if app.create_active {
+        app.create_input.len()
+    } else {
+        app.search_input.len()
+    };
     frame.set_cursor_position(Position::new(
-        chunks[1].x + app.search_input.len() as u16 + 2,
+        chunks[1].x + cursor_len as u16 + 2,
         chunks[1].y + 1,
     ));
 
@@ -138,10 +156,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     } else {
         "Hidden: OFF"
     };
-    let status_text = if let Some(ref msg) = app.status_message {
+    let status_text = if app.create_active {
+        format!(" New in {}/ | Enter: create | Esc: cancel | {}", base_display, hidden_status)
+    } else if let Some(ref msg) = app.status_message {
         format!(" {} | {}", msg, hidden_status)
     } else {
-        format!(" Tab: toggle hidden | {}", hidden_status)
+        format!(" Tab: toggle hidden | Ctrl+N: new | {}", hidden_status)
     };
     let status = Paragraph::new(status_text)
         .style(Style::default().bg(Color::DarkGray).fg(Color::White));

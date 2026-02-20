@@ -49,6 +49,7 @@ teditor /path/to/project
 | `Type` | Filter files |
 | `↑/↓` | Navigate results |
 | `Enter` | Open file / expand folder |
+| `Ctrl+N` | Create file/folder |
 | `Tab` | Toggle hidden files |
 | `Esc` | Quit |
 

@@ -15,15 +15,16 @@ pub struct Editor {
     pub syntax_set: SyntaxSet,
     pub theme: Theme,
     modified: bool,
-    original_content: String,
-    highlighted_lines: Vec<Line<'static>>,
+    original_hash: u64,
+    highlighted_lines: Vec<Vec<(Style, String)>>,
+    line_lengths: Vec<usize>,
     content_hash: u64,
 }
 
 impl Editor {
     pub fn open(path: PathBuf) -> Result<Self> {
         let content = fs::read_to_string(&path)?;
-        let original_content = content.clone();
+        let original_hash = simple_hash(&content);
 
         let lines: Vec<String> = content.lines().map(String::from).collect();
         let mut textarea = TextArea::new(lines);
@@ -41,8 +42,9 @@ impl Editor {
             syntax_set,
             theme,
             modified: false,
-            original_content,
+            original_hash,
             highlighted_lines: Vec::new(),
+            line_lengths: Vec::new(),
             content_hash: 0,
         };
         editor.update_highlighting();
@@ -52,6 +54,8 @@ impl Editor {
     fn update_highlighting(&mut self) {
         let content = self.textarea.lines().join("\n");
         let new_hash = simple_hash(&content);
+
+        self.modified = new_hash != self.original_hash;
 
         if new_hash == self.content_hash && !self.highlighted_lines.is_empty() {
             return;
@@ -65,48 +69,61 @@ impl Editor {
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
 
         let mut highlighter = HighlightLines::new(syntax, &self.theme);
-        let mut styled_lines: Vec<Line<'static>> = Vec::new();
+        let mut styled_lines: Vec<Vec<(Style, String)>> = Vec::new();
+        let mut line_lengths: Vec<usize> = Vec::new();
 
-        for (line_num, line) in LinesWithEndings::from(&content).enumerate() {
+        for line in LinesWithEndings::from(&content) {
             let ranges = highlighter
                 .highlight_line(line, &self.syntax_set)
                 .unwrap_or_default();
 
-            let mut spans: Vec<Span<'static>> = Vec::new();
-
-            spans.push(Span::styled(
-                format!("{:4} ", line_num + 1),
-                Style::default().fg(Color::DarkGray),
-            ));
+            let mut spans: Vec<(Style, String)> = Vec::new();
+            let mut line_len = 0;
 
             for (style, text) in ranges {
-                spans.push(Span::styled(
-                    text.trim_end_matches('\n').to_string(),
-                    syntect_to_ratatui_style(style),
-                ));
+                let cleaned = text.trim_end_matches('\n');
+                if cleaned.is_empty() {
+                    continue;
+                }
+                line_len += cleaned.chars().count();
+                spans.push((syntect_to_ratatui_style(style), cleaned.to_string()));
             }
 
-            styled_lines.push(Line::from(spans));
+            styled_lines.push(spans);
+            line_lengths.push(line_len);
+        }
+
+        if styled_lines.is_empty() {
+            styled_lines.push(Vec::new());
+            line_lengths.push(0);
         }
 
         self.highlighted_lines = styled_lines;
+        self.line_lengths = line_lengths;
     }
 
-    pub fn highlighted_lines(&self) -> &[Line<'static>] {
+    pub fn highlighted_lines(&self) -> &[Vec<(Style, String)>] {
         &self.highlighted_lines
+    }
+
+    pub fn line_lengths(&self) -> &[usize] {
+        &self.line_lengths
     }
 
     pub fn handle_input(&mut self, code: KeyCode, modifiers: KeyModifiers) {
         let input = crossterm::event::KeyEvent::new(code, modifiers);
         self.textarea.input(input);
-        self.modified = self.textarea.lines().join("\n") != self.original_content;
+        if is_navigation_key(code) {
+            return;
+        }
         self.update_highlighting();
     }
 
     pub fn save(&mut self) -> Result<()> {
         let content = self.textarea.lines().join("\n");
         fs::write(&self.path, &content)?;
-        self.original_content = content;
+        self.original_hash = simple_hash(&content);
+        self.content_hash = self.original_hash;
         self.modified = false;
         Ok(())
     }
@@ -139,7 +156,7 @@ impl Editor {
             self.textarea.input(crossterm::event::KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
         }
 
-        self.original_content = content;
+        self.original_hash = simple_hash(&content);
         self.modified = false;
         self.content_hash = 0;
         self.update_highlighting();
@@ -194,4 +211,18 @@ fn simple_hash(s: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+fn is_navigation_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+    )
 }
